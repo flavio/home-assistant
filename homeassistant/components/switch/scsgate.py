@@ -18,13 +18,18 @@ ATTR_SCENARIO_ID = 'scenario_id'
 
 DEPENDENCIES = ['scsgate']
 
-CONF_TRADITIONAL = 'traditional'
+CONF_TYPE = 'type'
 CONF_SCENARIO = 'scenario'
 
 CONF_SCS_ID = 'scs_id'
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_DEVICES): vol.Schema({cv.slug: scsgate.SCSGATE_SCHEMA}),
+    vol.Required(CONF_DEVICES): vol.Schema({
+        cv.slug: vol.Schema({
+            vol.Required(CONF_SCS_ID): cv.string,
+            vol.Optional('type'): cv.string,
+            vol.Optional(CONF_NAME): cv.string,
+            })}),
 })
 
 
@@ -32,51 +37,53 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the SCSGate switches."""
     logger = logging.getLogger(__name__)
 
-    _setup_traditional_switches(
-        logger=logger, config=config, add_devices_callback=add_devices)
+    traditional_switches = []
+    switches = config.get("devices")
 
-    _setup_scenario_switches(logger=logger, config=config, hass=hass)
+    if switches:
+        for _, entity_info in switches.items():
+            if entity_info[scsgate.CONF_SCS_ID] in scsgate.SCSGATE.devices:
+                continue
+
+            switch_type = entity_info.get(CONF_TYPE)
+            if switch_type == CONF_SCENARIO:
+                _setup_scenario_switch(
+                    entity_info=entity_info,
+                    logger=logger,
+                    hass=hass)
+            elif switch_type is not None:
+                logger.warning(
+                    "Ignoring scsgate switch of unknown type: %s",
+                    switch_type)
+                continue
+            else:
+                traditional_switches.append(_setup_traditional_switch(logger, entity_info))
+
+    if traditional_switches:
+        add_devices(traditional_switches)
+        scsgate.SCSGATE.add_devices_to_register(traditional_switches)
 
 
-def _setup_traditional_switches(logger, config, add_devices_callback):
+def _setup_traditional_switch(logger, entity_info):
     """Add traditional SCSGate switches."""
-    traditional = config.get(CONF_TRADITIONAL)
-    switches = []
+    name = entity_info[CONF_NAME]
+    scs_id = entity_info[scsgate.CONF_SCS_ID]
 
-    if traditional:
-        for _, entity_info in traditional.items():
-            if entity_info[scsgate.CONF_SCS_ID] in scsgate.SCSGATE.devices:
-                continue
+    logger.info("Adding %s scsgate.traditional_switch", name)
 
-            name = entity_info[CONF_NAME]
-            scs_id = entity_info[scsgate.CONF_SCS_ID]
-
-            logger.info("Adding %s scsgate.traditional_switch", name)
-
-            switch = SCSGateSwitch(name=name, scs_id=scs_id, logger=logger)
-            switches.append(switch)
-
-    add_devices_callback(switches)
-    scsgate.SCSGATE.add_devices_to_register(switches)
+    return SCSGateSwitch(name=name, scs_id=scs_id, logger=logger)
 
 
-def _setup_scenario_switches(logger, config, hass):
+def _setup_scenario_switch(entity_info, logger, hass):
     """Add only SCSGate scenario switches."""
-    scenario = config.get(CONF_SCENARIO)
+    name = entity_info[CONF_NAME]
+    scs_id = entity_info[scsgate.CONF_SCS_ID]
 
-    if scenario:
-        for _, entity_info in scenario.items():
-            if entity_info[scsgate.CONF_SCS_ID] in scsgate.SCSGATE.devices:
-                continue
+    logger.info("Adding %s scsgate.scenario_switch", name)
 
-            name = entity_info[CONF_NAME]
-            scs_id = entity_info[scsgate.CONF_SCS_ID]
-
-            logger.info("Adding %s scsgate.scenario_switch", name)
-
-            switch = SCSGateScenarioSwitch(
-                name=name, scs_id=scs_id, logger=logger, hass=hass)
-            scsgate.SCSGATE.add_device(switch)
+    switch = SCSGateScenarioSwitch(
+        name=name, scs_id=scs_id, logger=logger, hass=hass)
+    scsgate.SCSGATE.add_device(switch)
 
 
 class SCSGateSwitch(SwitchDevice):
